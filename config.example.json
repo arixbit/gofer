@@ -1,0 +1,10 @@
+{
+  "provider": {
+    "type": "deepseek",
+    "api_key": "在这里填写 API Key",
+    "model": "deepseek-v4-flash"
+  },
+  "skills": [],
+  "mcp_servers": [],
+  "system_prompt": "先读后改；修改后优先运行最小、相关的验证命令。"
+}
