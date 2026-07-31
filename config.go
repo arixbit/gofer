@@ -132,8 +132,13 @@ func mergeConfig(defaults, override Config, configDir string) Config {
 
 func applyProviderDefaults(config *Config) {
 	config.Provider.Type = strings.ToLower(strings.TrimSpace(config.Provider.Type))
+	// 没有显式指定 type 时，根据是否填写 base_url 自动推断。
 	if config.Provider.Type == "" {
-		config.Provider.Type = "deepseek"
+		if strings.TrimSpace(config.Provider.BaseURL) != "" {
+			config.Provider.Type = "openai-compatible"
+		} else {
+			config.Provider.Type = "deepseek"
+		}
 	}
 	if config.Provider.Model == "" && config.Provider.Type == "deepseek" {
 		config.Provider.Model = "deepseek-v4-flash"

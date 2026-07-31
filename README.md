@@ -29,13 +29,24 @@ chmod 600 ~/.coding-agent/config.json
 ```json
 {
   "provider": {
-    "type": "deepseek",
     "api_key": "sk-xxxxxxxxxxxxxxxx"
   }
 }
 ```
 
-默认使用 DeepSeek (`deepseek-v4-flash`)。如果要使用其他 OpenAI-compatible 的 Provider，改为 `"type": "openai-compatible"` 并填写 `base_url`。
+默认使用 DeepSeek（模型 `deepseek-v4-flash`）。如果你的 API 不是 DeepSeek，加上 `base_url` 和 `model`：
+
+```json
+{
+  "provider": {
+    "api_key": "sk-xxxxxxxxxxxxxxxx",
+    "base_url": "https://api.example.com/v1",
+    "model": "your-model-name"
+  }
+}
+```
+
+只要填了 `base_url`，Gofer 就会自动走 OpenAI-compatible 协议。不需要手动指定 `type` 字段。
 
 ## 使用
 
