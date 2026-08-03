@@ -114,6 +114,11 @@ func mergeConfig(defaults, override Config, configDir string) Config {
 	if override.Provider.BaseURL != "" {
 		merged.Provider.BaseURL = override.Provider.BaseURL
 	}
+	if override.Provider.BaseURL != "" && override.Provider.Type == "" {
+		// 用户只填 base_url 未指定 type 时，清空 defaults 预推断的 type（defaults 的 base_url 为空，必然预推断成 deepseek），
+		// 让 applyProviderDefaults 按最终的 base_url 重新推断。
+		merged.Provider.Type = ""
+	}
 	if override.Skills != nil {
 		merged.Skills = make([]string, len(override.Skills))
 		for i, root := range override.Skills {

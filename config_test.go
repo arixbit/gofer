@@ -25,6 +25,44 @@ func TestNormalizeConfigResolvesRelativePathsAndDefaults(t *testing.T) {
 	}
 }
 
+func TestProviderTypeInferredFromBaseURL(t *testing.T) {
+	base := t.TempDir()
+
+	t.Run("base_url 非空且未指定 type，推断为 openai-compatible", func(t *testing.T) {
+		config, err := normalizeConfig(Config{
+			Provider: ProviderConfig{BaseURL: "https://example.test/v1"},
+		}, base)
+		if err != nil {
+			t.Fatalf("normalizeConfig(): %v", err)
+		}
+		if config.Provider.Type != "openai-compatible" {
+			t.Fatalf("type = %q, want openai-compatible", config.Provider.Type)
+		}
+	})
+
+	t.Run("base_url 为空且未指定 type，推断为 deepseek", func(t *testing.T) {
+		config, err := normalizeConfig(Config{}, base)
+		if err != nil {
+			t.Fatalf("normalizeConfig(): %v", err)
+		}
+		if config.Provider.Type != "deepseek" {
+			t.Fatalf("type = %q, want deepseek", config.Provider.Type)
+		}
+	})
+
+	t.Run("显式指定 type 时优先于推断", func(t *testing.T) {
+		config, err := normalizeConfig(Config{
+			Provider: ProviderConfig{Type: "deepseek", BaseURL: "https://example.test/v1"},
+		}, base)
+		if err != nil {
+			t.Fatalf("normalizeConfig(): %v", err)
+		}
+		if config.Provider.Type != "deepseek" {
+			t.Fatalf("type = %q, want deepseek（显式指定优先）", config.Provider.Type)
+		}
+	})
+}
+
 func TestNewProviderOnlyAcceptsImplementedTypes(t *testing.T) {
 	if _, err := newProvider(ProviderConfig{Type: "unknown", APIKey: "test"}); err == nil {
 		t.Fatal("unknown provider unexpectedly accepted")

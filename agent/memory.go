@@ -36,7 +36,12 @@ func (m *InMemoryMemory) Compress(ctx context.Context, messages []Message) []Mes
 		total := 0
 		for _, msg := range messages {
 			for _, block := range msg.Content {
-				total += len(block.Text()) / 2 // 粗略估算：每字符约 0.5 token
+				// 粗略估算：每字符约 0.5 token。tool_use 的 JSON 参数也计入，
+				// 否则 write 一次大文件内容会被估成 0 token。
+				total += len(block.Text()) / 2
+				if block.Type() == "tool_use" {
+					total += len(block.Input()) / 2
+				}
 			}
 		}
 		if total <= m.maxTokens {
