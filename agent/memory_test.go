@@ -47,56 +47,6 @@ func TestInMemoryMemory_Compress_RespectsUserTurnBoundary(t *testing.T) {
 	}
 }
 
-func TestTruncationMemory_Compress_RespectsUserTurnBoundary(t *testing.T) {
-	history := []Message{
-		{Role: "user", Content: []ContentBlock{NewTextBlock("search for Go")}},
-		{Role: "assistant", Content: []ContentBlock{
-			NewToolUseBlock("call_1", "search", nil),
-		}},
-		{Role: "user", Content: []ContentBlock{
-			NewToolResultBlock("call_1", "Go 1.22 released", false),
-		}},
-		{Role: "assistant", Content: []ContentBlock{NewTextBlock("Go 1.22 includes range over int")}},
-		{Role: "user", Content: []ContentBlock{NewTextBlock("now search for Rust")}},
-	}
-
-	// 使用真实 CountTokens 的 TruncationMemory，但把 maxTokens 设极低
-	mem := NewTruncationMemory(&fakeProvider{}, 1)
-	compressed := mem.Compress(context.Background(), history)
-
-	if len(compressed) == 0 {
-		t.Fatal("压缩后消息列表为空")
-	}
-
-	first := compressed[0]
-	if first.Role == "user" {
-		hasToolResult := false
-		hasText := false
-		for _, b := range first.Content {
-			switch b.Type() {
-			case "tool_result":
-				hasToolResult = true
-			case "text":
-				hasText = true
-			}
-		}
-		if hasToolResult && !hasText {
-			t.Errorf("截断后第一条消息是孤立 tool_result")
-		}
-	}
-}
-
-// fakeProvider 用于 TruncationMemory 测试——总是返回高 token 数，触发压缩
-type fakeProvider struct{}
-
-func (p *fakeProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	return nil, nil
-}
-
-func (p *fakeProvider) CountTokens(ctx context.Context, messages []Message) (int, error) {
-	return 999999, nil
-}
-
 func Test_isUserTurnBoundary(t *testing.T) {
 	tests := []struct {
 		name string

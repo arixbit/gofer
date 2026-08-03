@@ -1,3 +1,4 @@
 .coding-agent/
 .env
 config.json
+.pi-subagents/

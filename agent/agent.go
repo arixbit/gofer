@@ -116,7 +116,6 @@ type agentConfig struct {
 	systemPrompt string
 	tools        []Tool
 	memory       Memory
-	middleware   []Middleware
 	registry     *ToolRegistry
 	tracer       Tracer
 }
@@ -144,12 +143,6 @@ func WithTools(tools ...Tool) AgentOption {
 
 func WithMemory(m Memory) AgentOption {
 	return func(c *agentConfig) { c.memory = m }
-}
-
-func WithMiddleware(mw ...Middleware) AgentOption {
-	return func(c *agentConfig) {
-		c.middleware = append(c.middleware, mw...)
-	}
 }
 
 func WithToolRegistry(registry *ToolRegistry) AgentOption {
@@ -180,17 +173,10 @@ func NewAgent(provider ModelProvider, opts ...AgentOption) Agent {
 		opt(cfg)
 	}
 
-	var agent Agent = &reactAgent{
+	return &reactAgent{
 		provider: provider,
 		config:   cfg,
 	}
-
-	// 应用中间件（从外到内包裹）
-	for i := len(cfg.middleware) - 1; i >= 0; i-- {
-		agent = cfg.middleware[i](agent)
-	}
-
-	return agent
 }
 
 func (a *reactAgent) Run(ctx context.Context, req Request) (*Response, error) {
@@ -413,9 +399,4 @@ func (a *reactAgent) executeTool(ctx context.Context, block ContentBlock) (strin
 	// The Runtime deliberately has no interactive permission middleware. The
 	// execution boundary belongs to the process/container that launches it.
 	return tool.Execute(ctx, block.Input())
-}
-
-// AsChainStep 将 Agent 适配为 ChainStep
-func (a *reactAgent) AsChainStep() ChainStep {
-	return &agentChainStep{agent: a}
 }
