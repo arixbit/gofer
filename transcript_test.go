@@ -15,7 +15,10 @@ func TestTranscriptSurvivesRuntimeContextCompression(t *testing.T) {
 	}
 	provider := &compressionProvider{t: t}
 	store := &memorySessionStore{}
-	application := newTestApplication(t, workspace, provider, store)
+	// 注入小预算 memory，使 360002 字符的历史（约 180001 token）超过 180000 预算触发压缩。
+	application := newTestApplication(t, workspace, provider, store,
+		agent.WithMemory(agent.NewInMemoryMemory(180000)),
+	)
 
 	oldTurn := []agent.Message{
 		{Role: "user", Content: []agent.ContentBlock{agent.NewTextBlock(strings.Repeat("x", 360002))}},

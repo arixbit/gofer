@@ -134,6 +134,13 @@ type Agent interface {
 // AgentOption 函数式配置
 type AgentOption func(*agentConfig)
 
+// DeepSeek 官方规格：上下文长度 1M tokens，单轮输出最大 384K tokens。
+// 上下文预算留出输出空间，设为 640K（略低于上限，给系统提示和工具定义留安全边界）。
+const (
+	defaultContextBudget = 640 * 1024 // 上下文压缩预算
+	defaultMaxTokens     = 32 * 1024 // 单轮输出上限（保留 reasoning + 正文空间）
+)
+
 type agentConfig struct {
 	maxTokens    int
 	systemPrompt string
@@ -145,9 +152,9 @@ type agentConfig struct {
 
 func defaultConfig() *agentConfig {
 	return &agentConfig{
-		maxTokens: 8192,
+		maxTokens: defaultMaxTokens,
 		tools:     []Tool{},
-		memory:    NewInMemoryMemory(180000),
+		memory:    NewInMemoryMemory(defaultContextBudget),
 		tracer:    NoopTracer{},
 	}
 }
