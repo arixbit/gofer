@@ -7,8 +7,9 @@ import (
 // Memory 管理对话历史的 token 预算和压缩。
 // 对话历史由调用方通过 Request.History 传入并保存。
 type Memory interface {
-	// ShouldCompress 判断是否需要压缩
-	ShouldCompress(totalTokens int) bool
+	// ShouldCompress 判断是否需要压缩。它自行估算 token 数，
+	// 和 Compress 使用同一套口径，保证触发后一定能压到预算内。
+	ShouldCompress(messages []Message) bool
 
 	// Compress 压缩记忆（截断或摘要）
 	Compress(ctx context.Context, messages []Message) []Message
@@ -26,28 +27,14 @@ func NewInMemoryMemory(maxTokens int) *InMemoryMemory {
 	}
 }
 
-func (m *InMemoryMemory) ShouldCompress(totalTokens int) bool {
-	return totalTokens >= m.maxTokens
+func (m *InMemoryMemory) ShouldCompress(messages []Message) bool {
+	return estimateTokens(messages) >= m.maxTokens
 }
 
 func (m *InMemoryMemory) Compress(ctx context.Context, messages []Message) []Message {
 	// 简单策略：从头开始删最早的对话轮次，直到 token 数降到预算内
 	for len(messages) >= 2 {
-		total := 0
-		for _, msg := range messages {
-			for _, block := range msg.Content {
-				// 粗略估算：每字符约 0.5 token。tool_use 的 JSON 参数也计入，
-				// 否则 write 一次大文件内容会被估成 0 token。
-				total += len(block.Text()) / 2
-				if block.Type() == "tool_use" {
-					total += len(block.Input()) / 2
-				}
-				if block.Type() == "reasoning" {
-					total += len(block.Reasoning()) / 2
-				}
-			}
-		}
-		if total <= m.maxTokens {
+		if estimateTokens(messages) <= m.maxTokens {
 			break
 		}
 
@@ -63,6 +50,25 @@ func (m *InMemoryMemory) Compress(ctx context.Context, messages []Message) []Mes
 		messages = messages[cutIdx:]
 	}
 	return messages
+}
+
+// estimateTokens 用字符数粗略估算 token 数，和 Compress 使用同一套口径。
+// 每字符约 0.5 token；tool_use 的 JSON 参数和 reasoning 的推理内容也计入，
+// 否则 write 一次大文件或开思考后长推理都会被估成 0 token。
+func estimateTokens(messages []Message) int {
+	total := 0
+	for _, msg := range messages {
+		for _, block := range msg.Content {
+			total += len(block.Text()) / 2
+			if block.Type() == "tool_use" {
+				total += len(block.Input()) / 2
+			}
+			if block.Type() == "reasoning" {
+				total += len(block.Reasoning()) / 2
+			}
+		}
+	}
+	return total
 }
 
 // isUserTurnBoundary 判断一条消息是否为真正的用户对话轮次分界点。

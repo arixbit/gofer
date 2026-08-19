@@ -145,7 +145,7 @@ type agentConfig struct {
 
 func defaultConfig() *agentConfig {
 	return &agentConfig{
-		maxTokens: 4096,
+		maxTokens: 8192,
 		tools:     []Tool{},
 		memory:    NewInMemoryMemory(180000),
 		tracer:    NoopTracer{},
@@ -224,9 +224,8 @@ func (a *reactAgent) Run(ctx context.Context, req Request) (*Response, error) {
 			a.trace(ctx, TraceEvent{RunID: runID, Type: "run_error", Iteration: iteration, Error: wrapped.Error()})
 			return partialResponse(messages, totalInput, totalOutput), wrapped
 		}
-		// token 预算检查
-		tokenCount, err := a.provider.CountTokens(ctx, messages)
-		if err == nil && a.config.memory.ShouldCompress(tokenCount) {
+		// token 预算检查：Memory 自行估算，和 Compress 使用同一套口径，保证触发后一定能压到预算内。
+		if a.config.memory.ShouldCompress(messages) {
 			messages = a.config.memory.Compress(ctx, messages)
 		}
 
