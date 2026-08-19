@@ -42,6 +42,9 @@ func (m *InMemoryMemory) Compress(ctx context.Context, messages []Message) []Mes
 				if block.Type() == "tool_use" {
 					total += len(block.Input()) / 2
 				}
+				if block.Type() == "reasoning" {
+					total += len(block.Reasoning()) / 2
+				}
 			}
 		}
 		if total <= m.maxTokens {
