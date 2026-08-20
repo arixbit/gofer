@@ -39,13 +39,14 @@ type Message struct {
 
 // ContentBlock 是消息内容块
 type ContentBlock interface {
-	Type() string // "text" / "tool_use" / "tool_result"
+	Type() string // "text" / "tool_use" / "tool_result" / "reasoning"
 	// 以下方法仅特定类型的 Block 实现，调用前应先用 Type() 判断
 	ID() string             // tool_use / tool_result
 	Name() string           // tool_use
 	Input() json.RawMessage // tool_use
 	Text() string           // text
 	IsError() bool          // tool_result
+	Reasoning() string      // reasoning
 }
 
 // NewTextBlock 创建文本内容块
@@ -65,6 +66,13 @@ func NewToolUseBlock(id, name string, input json.RawMessage) ContentBlock {
 	return &toolUseBlock{id: id, name: name, input: input}
 }
 
+// NewReasoningBlock 创建思考内容块。
+// DeepSeek 等 reasoner 模型会把推理过程放在 reasoning_content，框架将其存为 reasoning 块，
+// 在下一轮请求中原样回传，满足多轮工具调用对 reasoning_content 的回传约束。
+func NewReasoningBlock(reasoning string) ContentBlock {
+	return &reasoningBlock{reasoning: reasoning}
+}
+
 type textBlock struct {
 	text string
 }
@@ -75,6 +83,7 @@ func (b *textBlock) ID() string             { return "" }
 func (b *textBlock) Name() string           { return "" }
 func (b *textBlock) Input() json.RawMessage { return nil }
 func (b *textBlock) IsError() bool          { return false }
+func (b *textBlock) Reasoning() string      { return "" }
 
 type toolResultBlock struct {
 	id      string
@@ -88,6 +97,7 @@ func (b *toolResultBlock) Name() string           { return "" }
 func (b *toolResultBlock) Input() json.RawMessage { return nil }
 func (b *toolResultBlock) Text() string           { return b.result }
 func (b *toolResultBlock) IsError() bool          { return b.isError }
+func (b *toolResultBlock) Reasoning() string      { return "" }
 
 type toolUseBlock struct {
 	id    string
@@ -101,6 +111,19 @@ func (b *toolUseBlock) Name() string           { return b.name }
 func (b *toolUseBlock) Input() json.RawMessage { return b.input }
 func (b *toolUseBlock) Text() string           { return "" }
 func (b *toolUseBlock) IsError() bool          { return false }
+func (b *toolUseBlock) Reasoning() string      { return "" }
+
+type reasoningBlock struct {
+	reasoning string
+}
+
+func (b *reasoningBlock) Type() string           { return "reasoning" }
+func (b *reasoningBlock) Reasoning() string      { return b.reasoning }
+func (b *reasoningBlock) Text() string           { return "" }
+func (b *reasoningBlock) ID() string             { return "" }
+func (b *reasoningBlock) Name() string           { return "" }
+func (b *reasoningBlock) Input() json.RawMessage { return nil }
+func (b *reasoningBlock) IsError() bool          { return false }
 
 // Agent 是框架的核心接口
 type Agent interface {
@@ -110,6 +133,13 @@ type Agent interface {
 
 // AgentOption 函数式配置
 type AgentOption func(*agentConfig)
+
+// DeepSeek 官方规格：上下文长度 1M tokens，单轮输出最大 384K tokens。
+// 上下文预算留出输出空间，设为 640K（略低于上限，给系统提示和工具定义留安全边界）。
+const (
+	defaultContextBudget = 640 * 1024 // 上下文压缩预算
+	defaultMaxTokens     = 32 * 1024 // 单轮输出上限（保留 reasoning + 正文空间）
+)
 
 type agentConfig struct {
 	maxTokens    int
@@ -122,9 +152,9 @@ type agentConfig struct {
 
 func defaultConfig() *agentConfig {
 	return &agentConfig{
-		maxTokens: 4096,
+		maxTokens: defaultMaxTokens,
 		tools:     []Tool{},
-		memory:    NewInMemoryMemory(180000),
+		memory:    NewInMemoryMemory(defaultContextBudget),
 		tracer:    NoopTracer{},
 	}
 }
@@ -201,9 +231,8 @@ func (a *reactAgent) Run(ctx context.Context, req Request) (*Response, error) {
 			a.trace(ctx, TraceEvent{RunID: runID, Type: "run_error", Iteration: iteration, Error: wrapped.Error()})
 			return partialResponse(messages, totalInput, totalOutput), wrapped
 		}
-		// token 预算检查
-		tokenCount, err := a.provider.CountTokens(ctx, messages)
-		if err == nil && a.config.memory.ShouldCompress(tokenCount) {
+		// token 预算检查：Memory 自行估算，和 Compress 使用同一套口径，保证触发后一定能压到预算内。
+		if a.config.memory.ShouldCompress(messages) {
 			messages = a.config.memory.Compress(ctx, messages)
 		}
 

@@ -67,6 +67,10 @@ gofer
 > 把第 12 行的 fmt.Println 改成 log.Println
 ```
 
+DeepSeek 默认开启 Thinking Mode：模型在给出回答前会先进行推理，推理过程以 `💭 ` 前缀实时打印在终端，正文紧随其后。推理内容（`reasoning_content`）会被存入会话历史并在下一轮请求中原样回传，满足 DeepSeek 多轮工具调用对 reasoning 回传的协议约束。
+
+上下文预算默认 640K tokens（DeepSeek 上下文上限 1M），超出时自动从最早轮次截断历史。单轮输出上限 32K tokens。
+
 内置命令：
 
 | 命令 | 作用 |

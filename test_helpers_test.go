@@ -34,7 +34,7 @@ func (s *memorySessionStore) Save(state SessionState) error {
 	return nil
 }
 
-func newTestApplication(t *testing.T, workspace Workspace, provider agent.ModelProvider, store SessionStore) *Application {
+func newTestApplication(t *testing.T, workspace Workspace, provider agent.ModelProvider, store SessionStore, opts ...agent.AgentOption) *Application {
 	t.Helper()
 	registry := agent.NewToolRegistry()
 	application := &Application{
@@ -56,9 +56,10 @@ func newTestApplication(t *testing.T, workspace Workspace, provider agent.ModelP
 			t.Fatalf("RegisterTool(%s): %v", tool.Definition().Name, err)
 		}
 	}
+	allOpts := append([]agent.AgentOption{agent.WithToolRegistry(registry)}, opts...)
 	application.runtime = agent.NewAgent(
 		provider,
-		agent.WithToolRegistry(registry),
+		allOpts...,
 	)
 	if err := application.installDefaultCommands(); err != nil {
 		t.Fatalf("installDefaultCommands: %v", err)

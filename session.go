@@ -72,12 +72,13 @@ type storedMessage struct {
 }
 
 type storedBlock struct {
-	Type    string          `json:"type"`
-	ID      string          `json:"id,omitempty"`
-	Name    string          `json:"name,omitempty"`
-	Input   json.RawMessage `json:"input,omitempty"`
-	Text    string          `json:"text,omitempty"`
-	IsError bool            `json:"is_error,omitempty"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Text      string          `json:"text,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+	Reasoning string          `json:"reasoning,omitempty"`
 }
 
 func NewFileSessionStore(dir, cwd string) *FileSessionStore {
@@ -364,6 +365,11 @@ func storeBlock(block agent.ContentBlock) (storedBlock, error) {
 			Text:    block.Text(),
 			IsError: block.IsError(),
 		}, nil
+	case "reasoning":
+		return storedBlock{
+			Type:      "reasoning",
+			Reasoning: block.Reasoning(),
+		}, nil
 	default:
 		return storedBlock{}, fmt.Errorf("不支持保存的内容块类型 %q", block.Type())
 	}
@@ -404,6 +410,8 @@ func restoreBlock(block storedBlock) (agent.ContentBlock, error) {
 			return nil, fmt.Errorf("tool_result 内容块缺少 id")
 		}
 		return agent.NewToolResultBlock(block.ID, block.Text, block.IsError), nil
+	case "reasoning":
+		return agent.NewReasoningBlock(block.Reasoning), nil
 	default:
 		return nil, fmt.Errorf("不支持恢复的内容块类型 %q", block.Type)
 	}

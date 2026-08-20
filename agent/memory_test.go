@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -64,5 +65,43 @@ func Test_isUserTurnBoundary(t *testing.T) {
 				t.Errorf("isUserTurnBoundary() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestInMemoryMemory_CompressAndShouldCompressShareEstimation 验证 ShouldCompress 和 Compress
+// 使用同一套 token 估算口径：一旦 ShouldCompress 报 true，Compress 后的结果必须报 false。
+// 这正是"240 万 token 压不下去"那个 bug 的回归守卫——两套口径不一致会导致触发后压不动。
+func TestInMemoryMemory_CompressAndShouldCompressShareEstimation(t *testing.T) {
+	// 构造多轮历史：前两轮各 400 字符（估算 200 token），最后一轮在预算内。
+	// 预算 150：前两轮加起来超预算触发压缩，删掉后只剩最后一轮，不再触发。
+	history := []Message{
+		{Role: "user", Content: []ContentBlock{NewTextBlock(strings.Repeat("a", 400))}},
+		{Role: "assistant", Content: []ContentBlock{NewTextBlock("ok")}},
+		{Role: "user", Content: []ContentBlock{NewTextBlock(strings.Repeat("b", 400))}},
+		{Role: "assistant", Content: []ContentBlock{NewTextBlock("ok")}},
+		{Role: "user", Content: []ContentBlock{NewTextBlock("last")}},
+	}
+	mem := NewInMemoryMemory(150)
+
+	if !mem.ShouldCompress(history) {
+		t.Fatal("ShouldCompress(history) = false, want true（历史超出预算）")
+	}
+	compressed := mem.Compress(context.Background(), history)
+	if mem.ShouldCompress(compressed) {
+		t.Fatalf("Compress 后仍触发压缩：口径不一致，压缩结果 %d 条消息", len(compressed))
+	}
+}
+
+// TestInMemoryMemory_EstimateTokensCountsReasoning 验证 reasoning 内容被计入 token 估算，
+// 否则开思考后每轮累积的推理内容会被估成 0，压缩触发远晚于实际需要。
+func TestInMemoryMemory_EstimateTokensCountsReasoning(t *testing.T) {
+	withReasoning := []Message{
+		{Role: "assistant", Content: []ContentBlock{NewReasoningBlock(strings.Repeat("r", 400))}},
+	}
+	withoutReasoning := []Message{
+		{Role: "assistant", Content: []ContentBlock{NewTextBlock("ok")}},
+	}
+	if estimateTokens(withReasoning) == estimateTokens(withoutReasoning) {
+		t.Fatal("reasoning 块未被计入 token 估算，开思考后压缩会延迟")
 	}
 }

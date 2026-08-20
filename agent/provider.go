@@ -50,7 +50,7 @@ type ChatResponse struct {
 // OpenAICompatibleProvider 基于 OpenAI Chat Completions 兼容接口的 ModelProvider 实现。
 //
 // 它只负责协议转换；具体供应商的地址、模型和鉴权由调用方配置。
-// DeepSeekProvider 在此基础上额外关闭 Thinking Mode。
+// DeepSeekProvider 在此基础上额外强制开启 Thinking Mode。
 type OpenAICompatibleProvider struct {
 	client       *openai.Client
 	defaultModel string
@@ -64,7 +64,8 @@ type DeepSeekProvider struct {
 
 // deepseekTransport 对 DeepSeek 请求补充协议字段。
 //
-// 它关闭 Thinking Mode，避免工具调用场景因未回传 reasoning_content 失败；
+// 它强制开启 Thinking Mode；reasoning_content 由框架作为 reasoning 块存入历史，
+// 在下一轮请求中由 buildChatCompletionRequest 写回 ReasoningContent，满足多轮回传约束。
 // 也为被 SDK 因空字符串省略 content 的消息补回该字段。
 type deepseekTransport struct {
 	base http.RoundTripper
@@ -87,7 +88,7 @@ func (t *deepseekTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		}
 		ensureMessagesHaveContent(bodyMap)
 		if _, exists := bodyMap["thinking"]; !exists {
-			bodyMap["thinking"] = map[string]string{"type": "disabled"}
+			bodyMap["thinking"] = map[string]string{"type": "enabled"}
 		}
 		modifiedBytes, err := json.Marshal(bodyMap)
 		if err != nil {
@@ -145,8 +146,8 @@ func NewDeepSeekProvider(apiKey string) *DeepSeekProvider {
 }
 
 // NewDeepSeekProviderWithModel 创建指定默认模型的 DeepSeek 提供商。
-// 自动注入 thinking: {type: "disabled"} 以避免 V4 默认 Thinking Mode
-// 在工具调用场景下缺少 reasoning_content 导致的 400 错误。
+// 自动注入 thinking: {type: "enabled"} 以强制开启 V4 Thinking Mode；
+// reasoning_content 由框架存入历史并在下一轮回传，避免多轮工具调用 400。
 func NewDeepSeekProviderWithModel(apiKey, defaultModel string) *DeepSeekProvider {
 	if strings.TrimSpace(defaultModel) == "" {
 		defaultModel = "deepseek-v4-flash"
@@ -154,7 +155,7 @@ func NewDeepSeekProviderWithModel(apiKey, defaultModel string) *DeepSeekProvider
 	config := openai.DefaultConfig(apiKey)
 	config.BaseURL = "https://api.deepseek.com"
 
-	// 包装 HTTPClient 注入 thinking 禁用
+	// 包装 HTTPClient 注入 thinking 开启
 	if httpClient, ok := config.HTTPClient.(*http.Client); ok {
 		httpClient.Transport = &deepseekTransport{
 			base: httpClient.Transport,
@@ -203,6 +204,9 @@ func (p *OpenAICompatibleProvider) buildChatCompletionRequest(req *ChatRequest) 
 				switch block.Type() {
 				case "text":
 					oaiMsg.Content = block.Text()
+				case "reasoning":
+					// 回传上一轮的 reasoning_content，满足 DeepSeek 多轮工具调用约束。
+					oaiMsg.ReasoningContent = block.Reasoning()
 				case "tool_use":
 					oaiMsg.ToolCalls = append(oaiMsg.ToolCalls, openai.ToolCall{
 						ID:   block.ID(),
@@ -247,7 +251,7 @@ func (p *OpenAICompatibleProvider) buildChatCompletionRequest(req *ChatRequest) 
 }
 
 func (p *OpenAICompatibleProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	// deepseekTransport 会自动注入 thinking: disabled。
+	// deepseekTransport 会自动注入 thinking: enabled。
 	resp, err := p.client.CreateChatCompletion(ctx, p.buildChatCompletionRequest(req))
 	if err != nil {
 		return nil, fmt.Errorf("API 调用失败: %w", err)
@@ -275,6 +279,9 @@ func chatResponseFromOpenAI(resp openai.ChatCompletionResponse) (*ChatResponse, 
 	choice := resp.Choices[0]
 	var blocks []ContentBlock
 
+	if choice.Message.ReasoningContent != "" {
+		blocks = append(blocks, NewReasoningBlock(choice.Message.ReasoningContent))
+	}
 	if choice.Message.Content != "" {
 		blocks = append(blocks, NewTextBlock(choice.Message.Content))
 	}
@@ -314,6 +321,12 @@ func (s *openAIChatStream) Recv() (StreamEvent, error) {
 			return StreamEvent{}, err
 		}
 		for _, choice := range chunk.Choices {
+			if choice.Delta.ReasoningContent != "" {
+				s.pending = append(s.pending, StreamEvent{
+					Type:      StreamEventReasoningDelta,
+					Reasoning: choice.Delta.ReasoningContent,
+				})
+			}
 			if choice.Delta.Content != "" {
 				s.pending = append(s.pending, StreamEvent{
 					Type: StreamEventTextDelta,
@@ -382,6 +395,9 @@ func (p *OpenAICompatibleProvider) CountTokens(ctx context.Context, messages []M
 		for _, block := range msg.Content {
 			tokens := tke.Encode(block.Text(), nil, nil)
 			total += len(tokens)
+			if block.Type() == "reasoning" {
+				total += len(tke.Encode(block.Reasoning(), nil, nil))
+			}
 		}
 		total += 4 // 每条消息的格式开销
 	}
@@ -395,6 +411,9 @@ func fallbackCount(messages []Message) int {
 	for _, msg := range messages {
 		for _, block := range msg.Content {
 			total += len(block.Text()) / 2
+			if block.Type() == "reasoning" {
+				total += len(block.Reasoning()) / 2
+			}
 		}
 	}
 	return total

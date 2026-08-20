@@ -213,6 +213,71 @@ func (s *eventSliceStream) Recv() (StreamEvent, error) {
 
 func (*eventSliceStream) Close() error { return nil }
 
+func TestOpenAIChatStreamEmitsReasoningDelta(t *testing.T) {
+	config := testOpenAIConfig(`data: {"id":"chatcmpl_rs","choices":[{"index":0,"delta":{"reasoning_content":"先"}}]}
+
+data: {"id":"chatcmpl_rs","choices":[{"index":0,"delta":{"reasoning_content":"想想"}}]}
+
+data: {"id":"chatcmpl_rs","choices":[{"index":0,"delta":{"content":"好了"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+`)
+	provider := newOpenAICompatibleProvider(config, "stream-model")
+	stream, err := provider.Stream(context.Background(), &ChatRequest{Messages: []Message{{Role: "user", Content: []ContentBlock{NewTextBlock("hi")}}}})
+	if err != nil {
+		t.Fatalf("Stream() error: %v", err)
+	}
+	defer stream.Close()
+
+	var events []StreamEvent
+	for {
+		event, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			t.Fatalf("Recv() error: %v", recvErr)
+		}
+		events = append(events, event)
+	}
+	if countStreamEvents(events, StreamEventReasoningDelta) != 2 {
+		t.Fatalf("reasoning events = %#v, want 2", events)
+	}
+	if events[0].Reasoning != "先" || events[1].Reasoning != "想想" {
+		t.Fatalf("reasoning deltas = %q / %q, want 先 / 想想", events[0].Reasoning, events[1].Reasoning)
+	}
+}
+
+func TestConsumeChatStreamAssemblesReasoningBeforeText(t *testing.T) {
+	stream := &fakeChatStream{events: []StreamEvent{
+		{Type: StreamEventReasoningDelta, Reasoning: "我先"},
+		{Type: StreamEventReasoningDelta, Reasoning: "想想"},
+		{Type: StreamEventTextDelta, Text: "好了"},
+		{Type: StreamEventDone, StopReason: "end_turn"},
+		{Type: StreamEventUsage, InputTokens: 3, OutputTokens: 5},
+	}}
+	response, err := consumeChatStream(context.Background(), stream, 1, nil)
+	if err != nil {
+		t.Fatalf("consumeChatStream() error: %v", err)
+	}
+	if len(response.Content) != 2 {
+		t.Fatalf("content blocks = %d, want 2 (reasoning + text)", len(response.Content))
+	}
+	if response.Content[0].Type() != "reasoning" || response.Content[0].Reasoning() != "我先想想" {
+		t.Fatalf("reasoning block = %#v, want reasoning 我先想想", response.Content[0])
+	}
+	if response.Content[1].Type() != "text" || response.Content[1].Text() != "好了" {
+		t.Fatalf("text block = %#v, want text 好了", response.Content[1])
+	}
+	if response.StopReason != "end_turn" {
+		t.Fatalf("stop reason = %q, want end_turn", response.StopReason)
+	}
+	if response.InputTokens != 3 || response.OutputTokens != 5 {
+		t.Fatalf("usage = %d/%d, want 3/5", response.InputTokens, response.OutputTokens)
+	}
+}
+
 func testOpenAIConfig(streamBody string) openai.ClientConfig {
 	config := openai.DefaultConfig("test-key")
 	config.BaseURL = "https://example.test/v1"

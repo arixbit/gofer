@@ -16,6 +16,8 @@ const (
 	StreamEventStart StreamEventType = "start"
 	// StreamEventTextDelta 表示新增的一小段文本。
 	StreamEventTextDelta StreamEventType = "text_delta"
+	// StreamEventReasoningDelta 表示新增的一小段思考内容（reasoning_content）。
+	StreamEventReasoningDelta StreamEventType = "reasoning_delta"
 	// StreamEventToolCallDelta 表示工具调用的 ID、名称或参数片段。
 	StreamEventToolCallDelta StreamEventType = "tool_call_delta"
 	// StreamEventDone 表示模型已经给出停止原因。
@@ -25,11 +27,12 @@ const (
 )
 
 // StreamEvent 是 Provider 与 Runtime 之间的规范化流事件。
-// TextDelta 和 ArgumentsDelta 可以逐个事件到达，不能把单个事件当成完整消息。
+// TextDelta、ReasoningDelta 和 ArgumentsDelta 可以逐个事件到达，不能把单个事件当成完整消息。
 type StreamEvent struct {
 	Type           StreamEventType
 	Iteration      int
 	Text           string
+	Reasoning      string
 	ToolCallIndex  int
 	ToolCallID     string
 	ToolName       string
@@ -102,6 +105,7 @@ func consumeChatStream(ctx context.Context, stream ChatStream, iteration int, si
 	}
 
 	var text strings.Builder
+	var reasoning strings.Builder
 	toolCalls := make(map[int]*assembledToolCall)
 	var toolOrder []int
 	stopReason := ""
@@ -126,6 +130,8 @@ func consumeChatStream(ctx context.Context, stream ChatStream, iteration int, si
 		switch event.Type {
 		case StreamEventTextDelta:
 			text.WriteString(event.Text)
+		case StreamEventReasoningDelta:
+			reasoning.WriteString(event.Reasoning)
 		case StreamEventToolCallDelta:
 			call, ok := toolCalls[event.ToolCallIndex]
 			if !ok {
@@ -150,6 +156,9 @@ func consumeChatStream(ctx context.Context, stream ChatStream, iteration int, si
 	}
 
 	blocks := make([]ContentBlock, 0, 1+len(toolOrder))
+	if reasoning.Len() > 0 {
+		blocks = append(blocks, NewReasoningBlock(reasoning.String()))
+	}
 	if text.Len() > 0 {
 		blocks = append(blocks, NewTextBlock(text.String()))
 	}

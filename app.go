@@ -146,19 +146,44 @@ func (a *Application) Run(ctx context.Context, input string) (string, error) {
 
 	streamedAnswer := false
 	lineOpen := false
+	reasoningOpen := false
 	var streamSink agent.StreamSink
 	if a.streamOutput != nil {
 		streamSink = func(_ context.Context, event agent.StreamEvent) error {
 			switch event.Type {
+			case agent.StreamEventReasoningDelta:
+				if event.Reasoning == "" {
+					return nil
+				}
+				if !reasoningOpen {
+					reasoningOpen = true
+					if _, err := fmt.Fprint(a.streamOutput, "💭 "); err != nil {
+						return err
+					}
+				}
+				_, err := fmt.Fprint(a.streamOutput, event.Reasoning)
+				return err
 			case agent.StreamEventTextDelta:
 				if event.Text == "" {
 					return nil
+				}
+				if reasoningOpen {
+					reasoningOpen = false
+					if _, err := fmt.Fprintln(a.streamOutput); err != nil {
+						return err
+					}
 				}
 				streamedAnswer = true
 				lineOpen = true
 				_, err := fmt.Fprint(a.streamOutput, event.Text)
 				return err
 			case agent.StreamEventDone:
+				if reasoningOpen {
+					reasoningOpen = false
+					if _, err := fmt.Fprintln(a.streamOutput); err != nil {
+						return err
+					}
+				}
 				if !lineOpen {
 					return nil
 				}
@@ -174,7 +199,7 @@ func (a *Application) Run(ctx context.Context, input string) (string, error) {
 		History:    a.history,
 		StreamSink: streamSink,
 	})
-	if runErr != nil && lineOpen && a.streamOutput != nil {
+	if runErr != nil && (lineOpen || reasoningOpen) && a.streamOutput != nil {
 		_, _ = fmt.Fprintln(a.streamOutput)
 	}
 	if response == nil {
